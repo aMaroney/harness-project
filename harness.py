@@ -50,7 +50,7 @@ def ask(prompt: str) -> tuple[str, str]:
             messages=[{"role": "user", "content": prompt}],
         )
         return response.choices[0].message.content, "local"
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — intentionally broad: any local failure should fall back to cloud
         print(f"(local failed: {e} — falling back to cloud)")
         response = cloud_client.chat.completions.create(
             model=CLOUD_MODEL,
