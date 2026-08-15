@@ -4,6 +4,7 @@ MINIMAL local-first LLM harness.
 See README.md for full setup instructions.
 """
 
+import json
 import os
 
 from dotenv import load_dotenv
@@ -12,7 +13,7 @@ from openai import OpenAI
 load_dotenv()  # reads OPENROUTER_API_KEY from a local .env file
 
 LOCAL_MODEL = "qwen3.5:9b"
-CLOUD_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
+CLOUD_MODEL = "poolside/laguna-xs-2.1:free"
 
 local_client = OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")
 cloud_client = OpenAI(
@@ -20,11 +21,71 @@ cloud_client = OpenAI(
     api_key=os.environ.get("OPENROUTER_API_KEY", "missing-key"),
 )
 
+# ---------------------------------------------------------------------------
+# Filesystem tools — the model can request these, your code executes them.
+# The model NEVER touches your disk directly; it can only ask, and this
+# code decides whether/how to actually do it.
+# ---------------------------------------------------------------------------
+
+
+def read_file(path: str) -> str:
+    try:
+        with open(path) as f:
+            return f.read()[
+                :4000
+            ]  # cap size so a huge file doesn't blow the context window
+    except Exception as e:  # noqa: BLE001 — intentionally broad
+        return f"error reading file: {e}"
+
+
+def list_directory(path: str = ".") -> str:
+    try:
+        return "\n".join(os.listdir(path))
+    except Exception as e:  # noqa: BLE001 — intentionally broad
+        return f"error listing directory: {e}"
+
+
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "description": "Read the contents of a local text file",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to the file"}
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_directory",
+            "description": "List files in a local directory",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Directory path, defaults to current dir",
+                    }
+                },
+            },
+        },
+    },
+]
+
+AVAILABLE_FUNCTIONS = {"read_file": read_file, "list_directory": list_directory}
+
 
 # h
 def looks_complex(prompt: str) -> bool:
     long_prompt = len(prompt) > 500
     complex_keywords = [
+        "use cloud",
         "refactor",
         "multi-step",
         "step by step",
@@ -36,28 +97,48 @@ def looks_complex(prompt: str) -> bool:
 
 
 def ask(prompt: str) -> tuple[str, str]:
-    """Returns (answer_text, which_tier_answered)."""
+    """Returns (answer_text, which_tier_answered). Handles tool calls in a loop:
+    if the model asks to read a file or list a directory, we run it locally
+    and hand the result back, until the model gives a final text answer."""
 
-    if looks_complex(prompt):
-        response = cloud_client.chat.completions.create(
-            model=CLOUD_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return response.choices[0].message.content, "cloud"
+    client, model, tier = (
+        (cloud_client, CLOUD_MODEL, "cloud")
+        if looks_complex(prompt)
+        else (local_client, LOCAL_MODEL, "local")
+    )
+
+    messages = [{"role": "user", "content": prompt}]
 
     try:
-        response = local_client.chat.completions.create(
-            model=LOCAL_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return response.choices[0].message.content, "local"
-    except Exception as e:  # noqa: BLE001 — intentionally broad: any local failure should fall back to cloud
-        print(f"(local failed: {e} — falling back to cloud)")
-        response = cloud_client.chat.completions.create(
-            model=CLOUD_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return response.choices[0].message.content, "cloud"
+        for _ in range(5):  # safety cap so a bad tool call can't loop forever
+            response = client.chat.completions.create(
+                model=model, messages=messages, tools=TOOLS
+            )
+            msg = response.choices[0].message
+
+            if not msg.tool_calls:
+                return msg.content, tier
+
+            messages.append(msg)
+            for call in msg.tool_calls:
+                func = AVAILABLE_FUNCTIONS[call.function.name]
+                args = json.loads(call.function.arguments or "{}")
+                result = func(**args)
+                messages.append(
+                    {"role": "tool", "tool_call_id": call.id, "content": result}
+                )
+
+        return "gave up after too many tool calls", tier
+
+    except Exception as e:
+        if tier == "local":
+            print(f"(local failed: {e} — falling back to cloud)")
+            response = cloud_client.chat.completions.create(
+                model=CLOUD_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return response.choices[0].message.content, "cloud"
+        raise
 
 
 def main():

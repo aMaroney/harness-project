@@ -1,16 +1,22 @@
 [project]
-name = "llm-harness"
+name = "harness-project"
 version = "0.1.0"
-description = "Local-first LLM harness with cloud fallback"
+description = "Add your description here"
 requires-python = ">=3.12"
 dependencies = [
-    "openai>=1.0.0",
-    "python-dotenv>=1.0.0",
+    "openai>=3.1.0",
+    "python-dotenv>=1.2.2",
 ]
- 
+
+[project.scripts]
+harness-project = "harness_project:main"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
+
 [dependency-groups]
 dev = [
-    "ruff>=0.8.0",
-    "pre-commit>=4.0.0",
+    "pre-commit>=4.6.2",
+    "ruff>=0.16.3",
 ]
- 
