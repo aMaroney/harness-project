@@ -5,6 +5,7 @@ See README.md for full setup instructions.
 """
 
 import os
+
 from dotenv import load_dotenv
 from openai import OpenAI
 
