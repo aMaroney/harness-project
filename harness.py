@@ -4,8 +4,9 @@ MINIMAL local-first LLM harness.
 See README.md for full setup instructions.
 """
 
-import os
 import json
+import os
+
 from dotenv import load_dotenv
 from openai import OpenAI
 
@@ -33,14 +34,14 @@ def read_file(path: str) -> str:
             return f.read()[
                 :4000
             ]  # cap size so a huge file doesn't blow the context window
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — intentionally broad
         return f"error reading file: {e}"
 
 
 def list_directory(path: str = ".") -> str:
     try:
         return "\n".join(os.listdir(path))
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — intentionally broad
         return f"error listing directory: {e}"
 
 
