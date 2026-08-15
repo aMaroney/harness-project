@@ -80,8 +80,27 @@ TOOLS = [
 
 AVAILABLE_FUNCTIONS = {"read_file": read_file, "list_directory": list_directory}
 
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+HISTORY_FILE = os.path.join(PROJECT_DIR, ".harness_history.json")
 
-# h
+
+def load_history() -> list:
+    if os.path.exists(HISTORY_FILE):
+        with open(HISTORY_FILE) as f:
+            return json.load(f)
+    return []
+
+
+def save_history(history: list) -> None:
+    with open(HISTORY_FILE, "w") as f:
+        json.dump(history, f, indent=2)
+
+
+conversation_history = (
+    load_history()
+)  # loaded once at startup — this is last session's memory
+
+
 def looks_complex(prompt: str) -> bool:
     long_prompt = len(prompt) > 500
     complex_keywords = [
@@ -107,7 +126,7 @@ def ask(prompt: str) -> tuple[str, str]:
         else (local_client, LOCAL_MODEL, "local")
     )
 
-    messages = [{"role": "user", "content": prompt}]
+    messages = conversation_history + [{"role": "user", "content": prompt}]
 
     try:
         for _ in range(5):  # safety cap so a bad tool call can't loop forever
@@ -117,6 +136,13 @@ def ask(prompt: str) -> tuple[str, str]:
             msg = response.choices[0].message
 
             if not msg.tool_calls:
+                # Persist only the clean user/assistant exchange — not the tool-call
+                # plumbing, which is single-turn scaffolding, not memory worth keeping.
+                conversation_history.append({"role": "user", "content": prompt})
+                conversation_history.append(
+                    {"role": "assistant", "content": msg.content}
+                )
+                save_history(conversation_history)
                 return msg.content, tier
 
             messages.append(msg)
@@ -133,20 +159,33 @@ def ask(prompt: str) -> tuple[str, str]:
     except Exception as e:
         if tier == "local":
             print(f"(local failed: {e} — falling back to cloud)")
+            fallback_messages = conversation_history + [
+                {"role": "user", "content": prompt}
+            ]
             response = cloud_client.chat.completions.create(
-                model=CLOUD_MODEL,
-                messages=[{"role": "user", "content": prompt}],
+                model=CLOUD_MODEL, messages=fallback_messages
             )
-            return response.choices[0].message.content, "cloud"
+            answer = response.choices[0].message.content
+            conversation_history.append({"role": "user", "content": prompt})
+            conversation_history.append({"role": "assistant", "content": answer})
+            save_history(conversation_history)
+            return answer, "cloud"
         raise
 
 
 def main():
-    print("Harness ready. Type a question, or 'quit' to exit.\n")
+    print(
+        "Harness ready. Type a question, 'reset' to clear memory, or 'quit' to exit.\n"
+    )
     while True:
         question = input("> ").strip()
         if question.lower() in ("quit", "exit"):
             break
+        if question.lower() == "reset":
+            conversation_history.clear()
+            save_history(conversation_history)
+            print("Memory cleared.\n")
+            continue
         if not question:
             continue
 
