@@ -5,10 +5,11 @@ See README.md for full setup instructions.
 """
 
 import os
+
 from dotenv import load_dotenv
 from openai import OpenAI
 
-load_dotenv()  # reads OPENROUTER_API_KEY from a local .env file 
+load_dotenv()  # reads OPENROUTER_API_KEY from a local .env file
 
 LOCAL_MODEL = "qwen3.5:9b"
 CLOUD_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
@@ -20,9 +21,16 @@ cloud_client = OpenAI(
 )
 
 
+# h
 def looks_complex(prompt: str) -> bool:
     long_prompt = len(prompt) > 500
-    complex_keywords = ["refactor", "multi-step", "step by step", "across multiple", "compare and contrast"]
+    complex_keywords = [
+        "refactor",
+        "multi-step",
+        "step by step",
+        "across multiple",
+        "compare and contrast",
+    ]
     mentions_complex_task = any(word in prompt.lower() for word in complex_keywords)
     return long_prompt or mentions_complex_task
 
@@ -43,7 +51,7 @@ def ask(prompt: str) -> tuple[str, str]:
             messages=[{"role": "user", "content": prompt}],
         )
         return response.choices[0].message.content, "local"
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — intentionally broad: any local failure should fall back to cloud
         print(f"(local failed: {e} — falling back to cloud)")
         response = cloud_client.chat.completions.create(
             model=CLOUD_MODEL,
