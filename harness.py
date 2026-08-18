@@ -13,7 +13,7 @@ from openai import OpenAI
 load_dotenv()  # reads OPENROUTER_API_KEY from a local .env file
 
 LOCAL_MODEL = "qwen3.5:9b"
-CLOUD_MODEL = "poolside/laguna-xs-2.1:free"
+CLOUD_MODEL = os.environ.get("CLOUD_MODEL", "no model specified")
 
 local_client = OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")
 cloud_client = OpenAI(
@@ -104,7 +104,6 @@ conversation_history = (
 def looks_complex(prompt: str) -> bool:
     long_prompt = len(prompt) > 500
     complex_keywords = [
-        "use cloud",
         "refactor",
         "multi-step",
         "step by step",
@@ -115,14 +114,14 @@ def looks_complex(prompt: str) -> bool:
     return long_prompt or mentions_complex_task
 
 
-def ask(prompt: str, private_chat: bool) -> tuple[str, str]:
+def ask(prompt: str, private_chat: bool, use_cloud: bool) -> tuple[str, str]:
     """Returns (answer_text, which_tier_answered). Handles tool calls in a loop:
     if the model asks to read a file or list a directory, we run it locally
     and hand the result back, until the model gives a final text answer."""
 
     client, model, tier = (
         (cloud_client, CLOUD_MODEL, "cloud")
-        if looks_complex(prompt)
+        if looks_complex(prompt) or use_cloud
         else (local_client, LOCAL_MODEL, "local")
     )
 
@@ -181,6 +180,7 @@ def main():
     )
     while True:
         private_chat = False
+        use_cloud = False
         question = input("> ").strip()
         if question.lower() in ("quit", "exit"):
             break
@@ -192,10 +192,13 @@ def main():
         if "--no-save" in question:
             question = question.replace("--no-save", "")
             private_chat = True
+        if "--use-cloud" in question:
+            question = question.replace("--use-cloud", "")
+            use_cloud = True
         if not question:
             continue
 
-        answer, tier = ask(question, private_chat)
+        answer, tier = ask(question, private_chat, use_cloud)
         print(f"\n[answered by: {tier}]")
         print(answer)
         print()
