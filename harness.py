@@ -115,7 +115,7 @@ def looks_complex(prompt: str) -> bool:
     return long_prompt or mentions_complex_task
 
 
-def ask(prompt: str) -> tuple[str, str]:
+def ask(prompt: str, private_chat: bool) -> tuple[str, str]:
     """Returns (answer_text, which_tier_answered). Handles tool calls in a loop:
     if the model asks to read a file or list a directory, we run it locally
     and hand the result back, until the model gives a final text answer."""
@@ -136,13 +136,14 @@ def ask(prompt: str) -> tuple[str, str]:
             msg = response.choices[0].message
 
             if not msg.tool_calls:
-                # Persist only the clean user/assistant exchange — not the tool-call
-                # plumbing, which is single-turn scaffolding, not memory worth keeping.
-                conversation_history.append({"role": "user", "content": prompt})
-                conversation_history.append(
-                    {"role": "assistant", "content": msg.content}
-                )
-                save_history(conversation_history)
+                if not private_chat:
+                    # Persist only the clean user/assistant exchange — not the tool-call
+                    # plumbing, which is single-turn scaffolding, not memory worth keeping.
+                    conversation_history.append({"role": "user", "content": prompt})
+                    conversation_history.append(
+                        {"role": "assistant", "content": msg.content}
+                    )
+                    save_history(conversation_history)
                 return msg.content, tier
 
             messages.append(msg)
@@ -166,9 +167,10 @@ def ask(prompt: str) -> tuple[str, str]:
                 model=CLOUD_MODEL, messages=fallback_messages
             )
             answer = response.choices[0].message.content
-            conversation_history.append({"role": "user", "content": prompt})
-            conversation_history.append({"role": "assistant", "content": answer})
-            save_history(conversation_history)
+            if not private_chat:
+                conversation_history.append({"role": "user", "content": prompt})
+                conversation_history.append({"role": "assistant", "content": answer})
+                save_history(conversation_history)
             return answer, "cloud"
         raise
 
@@ -178,6 +180,7 @@ def main():
         "Harness ready. Type a question, 'reset' to clear memory, or 'quit' to exit.\n"
     )
     while True:
+        private_chat = False
         question = input("> ").strip()
         if question.lower() in ("quit", "exit"):
             break
@@ -186,10 +189,13 @@ def main():
             save_history(conversation_history)
             print("Memory cleared.\n")
             continue
+        if "--no-save" in question:
+            question = question.replace("--no-save", "")
+            private_chat = True
         if not question:
             continue
 
-        answer, tier = ask(question)
+        answer, tier = ask(question, private_chat)
         print(f"\n[answered by: {tier}]")
         print(answer)
         print()
